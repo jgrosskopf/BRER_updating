@@ -105,8 +105,6 @@ def make_pair_data_file(ca_dictionary, ca_indices, json_file_name='pair_data.jso
             json_file.close()
 
 
-
-
 def get_last_model(directory):
     '''
     Searches and locates the last model produced by BRER. This will couple with argparse so that the current BRER 
@@ -194,48 +192,3 @@ def model_ntx_update_ca(structure, label, label_pair, exp_data, distr_bin, ca_bi
     with open(f'{ca_bin}', 'wb') as file:
         pickle.dump(ca_dictionary, file)
         file.close()
-
-
-
-
-def init_dist(starting_model, exp_data):
-    '''
-    Get the initial C-alpha distance to run for BRER. This will measure the starting structure CA distance, model nitroxide,
-    and provide a new CA distance as the first run from the model_ntx_update_ca function. 
-    '''
-    u=mda.Universe(starting_model)
-    exp_data = np.loadtxt(exp_data) #data needs to be loaded as array with first vector as r values
-    r = exp_data[0] #r values need to be identical between experiment and modelled nitroxide for this to be accurate
-    
-    SL1 = xl.SpinLabel(protein=u, label=label, site=site1)
-    SL2 = xl.SpinLabel(protein=u, label=label, site=site2)
-
-    #need to add in error handling for the spin label, especially V1X
-    #also need to create a function to do this for each label pair. Might not have to be part of utils
-    traj, de = xl.repack(u, SL1, SL2,
-                            repetitions=2500,
-                            temp=295,
-                            off_rotamer=False,
-                            repack_radius=10) 
-    SL1r = xl.SpinLabel.from_trajectory(traj, site=int(site1), burn_in=1000, spin_atoms=SL1.spin_atoms)
-    SL2r = xl.SpinLabel.from_trajectory(traj, site=int(site2), burn_in=1000, spin_atoms=SL2.spin_atoms)
-
-    P = np.array(xl.distance_distribution(SL1r, SL2r, r))
-    
-    if os.path.exists(distr_bin) == False:
-         np.savetxt(distr_bin, P)
-    else:
-         d = np.loadtxt(distr_bin)
-         updated = np.vstack(d, P)
-         np.savetxt(distr_bin, updated)
-         
-def update_ca(exp_data, ntxd_model_data, pair_data):
-    '''
-    Updates the pair_data file with new C-alpha distances in which to bias the protein. This is based on the positive
-    residuals from exp - ntxd_model_data. The weighted average distance of the poistive residuals is computed, as well 
-    as the weighted average of the cumulative model_data. The difference of these two values are multipled by a learning
-    rate and added to a randomly drawn C
-
-
-    '''
-    exp_data = np.loadtxt(exp_data)
