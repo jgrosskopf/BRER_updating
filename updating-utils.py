@@ -1,9 +1,11 @@
 import chilife as xl
 import numpy as np
 import MDAnalysis as mda
+from MDAnalysis.analysis.distances import dist
 import os
 from natsort import os_sorted
 import glob
+import pickle
 
 def gro2pdb(structure):
     '''
@@ -11,6 +13,34 @@ def gro2pdb(structure):
 
     This may not be needed at all
     '''
+
+def initialize_files(starting_model, label_pairs):
+    '''
+    Initialize the files that will hold the C-alphas distances, indices
+    '''
+    ca_dist_dict = {}
+    ca_index_dict = {}
+    for pair in label_pairs:
+        site1, site2 = pair.split('_')
+        u=mda.Universe(starting_model)
+        ca_1 = u.select_atoms(f'resid {site1} and name CA')
+        ca_2 = u.select_atoms(f'resid {site2} and name CA')
+        res1, res2, ca = dist(ca_1, ca_2)
+
+        ca_dist_dict[f'{pair}'] = []
+        ca_dist_dict[f'{pair}'].append(ca)
+
+        ca_index_dict[f'{pair}'] = []
+        ca_index_dict[f'{pair}'].append([ca_1.indices[0]+1, ca_2.indices[0]+1])
+    
+    with open('ca_dist_dict.pickle', 'wb') as handle:
+        pickle.dump(ca_dist_dict, handle)
+        handle.close()
+
+    with open('ca_index_dict.pickle', 'wb') as handle:
+        pickle.dump(ca_index_dict, handle)
+        handle.close()
+
 
 
 def get_last_model(directory):
@@ -25,8 +55,7 @@ def get_last_model(directory):
     _dir = os.path.join(_dir[-1], 'production/*.gro')         #take last file in dir and join with string to get last model
     return _dir 
 
-
-def model_ntx_update_ca(structure, label, site1, site2, exp_data, distr_bin, **kwargs):
+def model_ntx_update_ca(structure, label, label_pair, exp_data, distr_bin, ca_bin='ca_bin', **kwargs):
     '''
     This function creates a modelled nitroxide distribution from and input structure,
     specifically from BRER. It then Updates the pair_data file with new C-alpha distances in which to bias the protein. 
@@ -46,11 +75,65 @@ def model_ntx_update_ca(structure, label, site1, site2, exp_data, distr_bin, **k
     u=mda.Universe(structure)
     exp_data = np.loadtxt(exp_data) #data needs to be loaded as array with first vector as r values
     r = exp_data[0] #r values need to be identical between experiment and modelled nitroxide for this to be accurate
+
+    site1, site2 = label_pair.split('_')
     
     SL1 = xl.SpinLabel(protein=u, label=label, site=site1)
     SL2 = xl.SpinLabel(protein=u, label=label, site=site2)
 
     #need to add in error handling for the spin label, especially V1X
+    #also need to create a function to do this for each label pair. Might not have to be part of utils
+    traj, de = xl.repack(u, SL1, SL2,
+                            repetitions=2500,
+                            temp=295,
+                            off_rotamer=False,
+                            repack_radius=10) 
+    SL1r = xl.SpinLabel.from_trajectory(traj, site=int(site1), burn_in=1000, spin_atoms=SL1.spin_atoms)
+    SL2r = xl.SpinLabel.from_trajectory(traj, site=int(site2), burn_in=1000, spin_atoms=SL2.spin_atoms)
+
+    P = np.array(xl.distance_distribution(SL1r, SL2r, r))
+    
+    if os.path.exists(distr_bin) == False:
+         np.savetxt(distr_bin, P)
+         updated = P
+    else:
+         d = np.loadtxt(distr_bin)
+         updated = np.vstack(d, P)
+         np.savetxt(distr_bin, updated)
+
+    #Update C-alpha distance 
+    if len(updated.shape) == 1:
+        residual = exp_data-updated
+        residual[residual<0]=0  #select for positive residuals
+
+        #if updated is only one vector long, then the initial CA distance has not been measured yet
+        ca_1 = u.select_atoms(f'resid {site1} and name CA')
+        ca_2 = u.select_atoms(f'resid {site2} and name CA')
+        res1, res2, ca = dist(ca_1, ca_2)
+
+
+    else:
+        updated = updated.sum(axis=0)
+        residual = exp_data-updated
+        residual[residual<0]=0  #select for positive residuals
+    
+
+
+
+def init_dist(starting_model, exp_data):
+    '''
+    Get the initial C-alpha distance to run for BRER. This will measure the starting structure CA distance, model nitroxide,
+    and provide a new CA distance as the first run from the model_ntx_update_ca function. 
+    '''
+    u=mda.Universe(starting_model)
+    exp_data = np.loadtxt(exp_data) #data needs to be loaded as array with first vector as r values
+    r = exp_data[0] #r values need to be identical between experiment and modelled nitroxide for this to be accurate
+    
+    SL1 = xl.SpinLabel(protein=u, label=label, site=site1)
+    SL2 = xl.SpinLabel(protein=u, label=label, site=site2)
+
+    #need to add in error handling for the spin label, especially V1X
+    #also need to create a function to do this for each label pair. Might not have to be part of utils
     traj, de = xl.repack(u, SL1, SL2,
                             repetitions=2500,
                             temp=295,
@@ -67,14 +150,6 @@ def model_ntx_update_ca(structure, label, site1, site2, exp_data, distr_bin, **k
          d = np.loadtxt(distr_bin)
          updated = np.vstack(d, P)
          np.savetxt(distr_bin, updated)
-
-    #Update C-alpha distance 
-
-def init_dist(starting_model, exp_data):
-    '''
-    Get the initial C-alpha distance to run for BRER. This will measure the starting structure CA distance, model nitroxide,
-    and provide a new CA distance as the first run from the model_ntx_update_ca function. 
-    '''
          
 def update_ca(exp_data, ntxd_model_data, pair_data):
     '''
