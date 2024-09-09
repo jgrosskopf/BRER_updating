@@ -48,11 +48,11 @@ def make_pair_data_file(ca_dictionary, ca_indices, json_file_name='pair_data.jso
     formatted pair_data.json file for input to BRER. 
     '''
     with open(f'{ca_dictionary}', 'rb') as file:    #unpickling C-alpha distance dictionary
-        ca_dicitonary = pickle.load(file)
+        ca_dictionary = pickle.load(file)
     with open(f'{ca_indices}', 'rb') as file:       #unpickling C-alpha index dictionary
         ca_indices = pickle.load(file)
     
-    keys = list(ca_dicitonary.keys())
+    keys = list(ca_dictionary.keys())
 
     json_template = ['{\n']
     json_file = open("{}".format(json_file_name), "w")
@@ -62,7 +62,7 @@ def make_pair_data_file(ca_dictionary, ca_indices, json_file_name='pair_data.jso
 
     for key in keys:
         ca1_index, ca2_index = ca_indices[key]
-        ca_dist = ca_dicitonary[key]
+        ca_dist = ca_dictionary[key][-1] #pulls the latest CA distance update
         if count < len(keys):
             name = f'{key}'
             sites = f'{ca1_index}, {ca2_index}'
@@ -119,7 +119,7 @@ def get_last_model(directory):
     _dir = os.path.join(_dir[-1], 'production/*.gro')         #take last file in dir and join with string to get last model
     return _dir 
 
-def model_ntx_update_ca(structure, label, label_pair, exp_data, distr_bin, ca_bin='ca_bin', **kwargs):
+def model_ntx_update_ca(structure, label, label_pair, exp_data, distr_bin, ca_bin='ca_bin', learn_rate=0.1, **kwargs):
     '''
     This function creates a modelled nitroxide distribution from and input structure,
     specifically from BRER. It then Updates the pair_data file with new C-alpha distances in which to bias the protein. 
@@ -139,6 +139,9 @@ def model_ntx_update_ca(structure, label, label_pair, exp_data, distr_bin, ca_bi
     u=mda.Universe(structure)
     exp_data = np.loadtxt(exp_data) #data needs to be loaded as array with first vector as r values
     r = exp_data[0] #r values need to be identical between experiment and modelled nitroxide for this to be accurate
+    distr_bin = distr_bin+'_'+label_pair+'_'+label+'.txt'   #name for distribution bin of a given label pair
+    with open(f'{ca_bin}', 'rb') as file:    #unpickling C-alpha distance dictionary
+        ca_dictionary = pickle.load(file) #load the ca distance dictionary
 
     site1, site2 = label_pair.split('_')
     
@@ -179,7 +182,19 @@ def model_ntx_update_ca(structure, label, label_pair, exp_data, distr_bin, ca_bi
         updated = updated.sum(axis=0)
         residual = exp_data-updated
         residual[residual<0]=0  #select for positive residuals
-    
+
+    res_w_avg = np.average(r, weights=residual/sum(residual))
+    mod_w_avg = np.average(r, weights=updated/sum(updated))
+
+    prev_ca = ca_dictionary[label_pair][-1]
+    new_ca = prev_ca + (learn_rate*(res_w_avg-mod_w_avg)) 
+
+    #append new ca distance into CA dictionary
+    ca_dictionary[label_pair].append(new_ca)
+    with open(f'{ca_bin}', 'wb') as file:
+        pickle.dump(ca_dictionary, file)
+        file.close()
+
 
 
 
