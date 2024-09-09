@@ -14,9 +14,10 @@ def gro2pdb(structure):
     This may not be needed at all
     '''
 
-def initialize_files(starting_model, label_pairs):
+def initialize_files(starting_model, label_pairs, ca_dist_filename='ca_dist_dict', ca_index_filename='ca_index_dict'):
     '''
-    Initialize the files that will hold the C-alphas distances, indices
+    Initialize the files that will hold the C-alphas distances and indices. The keys for these two dictionaries should
+    be identical for use later on.
     '''
     ca_dist_dict = {}
     ca_index_dict = {}
@@ -33,13 +34,76 @@ def initialize_files(starting_model, label_pairs):
         ca_index_dict[f'{pair}'] = []
         ca_index_dict[f'{pair}'].append([ca_1.indices[0]+1, ca_2.indices[0]+1])
     
-    with open('ca_dist_dict.pickle', 'wb') as handle:
+    with open(f'{ca_dist_filename}.pickle', 'wb') as handle:
         pickle.dump(ca_dist_dict, handle)
         handle.close()
 
-    with open('ca_index_dict.pickle', 'wb') as handle:
+    with open(f'{ca_index_filename}.pickle', 'wb') as handle:
         pickle.dump(ca_index_dict, handle)
         handle.close()
+
+def make_pair_data_file(ca_dictionary, ca_indices, json_file_name='pair_data.json'):
+    '''
+    Given a C-alpha dictionary and indices from the starting structure, this utility will create the appropriately
+    formatted pair_data.json file for input to BRER. 
+    '''
+    with open(f'{ca_dictionary}', 'rb') as file:    #unpickling C-alpha distance dictionary
+        ca_dicitonary = pickle.load(file)
+    with open(f'{ca_indices}', 'rb') as file:       #unpickling C-alpha index dictionary
+        ca_indices = pickle.load(file)
+    
+    keys = list(ca_dicitonary.keys())
+
+    json_template = ['{\n']
+    json_file = open("{}".format(json_file_name), "w")
+    json_file.writelines(json_template)
+    json_file.close()
+    count = 0
+
+    for key in keys:
+        ca1_index, ca2_index = ca_indices[key]
+        ca_dist = ca_dicitonary[key]
+        if count < len(keys):
+            name = f'{key}'
+            sites = f'{ca1_index}, {ca2_index}'
+            dist = ca_dist/10 #this needs to be in nm for BRER/Gromacs
+            dist = dist.tolist()
+            prob = 1            # 100% probability to pick this point (it's the only point lol)
+            prob=prob.tolist()
+            
+            json_template = [
+            '   "{}":'.format(name),' {\n',
+            '       "sites": [{}],\n'.format(sites), 
+            '       "name": "{}",\n'.format(name),
+            '       "distribution": {},\n'.format(prob),
+            '       "bins": {}\n'.format(dist),
+            '    },\n']
+            
+            json_file = open("{}".format(json_file_name), "a")
+            json_file.writelines(json_template)
+            json_file.close()
+            
+        elif count == len(keys):
+            name = f'{key}'
+            sites = f'{ca1_index}, {ca2_index}'
+            dist = ca_dist/10 #this needs to be in nm for BRER/Gromacs
+            dist = dist.tolist()
+            prob = 1            # 100% probability to pick this point (it's the only point lol)
+            prob=prob.tolist()
+            
+            json_template = [
+            '   "{}":'.format(name),' {\n',
+            '       "sites": [{}],\n'.format(sites), 
+            '       "name": "{}",\n'.format(name),
+            '       "distribution": {},\n'.format(prob),
+            '       "bins": {}\n'.format(dist),
+            '    }\n',
+            '}']
+            
+            json_file = open("{}".format(json_file_name), "a")
+            json_file.writelines(json_template)
+            json_file.close()
+
 
 
 
@@ -110,7 +174,6 @@ def model_ntx_update_ca(structure, label, label_pair, exp_data, distr_bin, ca_bi
         ca_1 = u.select_atoms(f'resid {site1} and name CA')
         ca_2 = u.select_atoms(f'resid {site2} and name CA')
         res1, res2, ca = dist(ca_1, ca_2)
-
 
     else:
         updated = updated.sum(axis=0)
