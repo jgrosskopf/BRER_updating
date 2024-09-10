@@ -2,17 +2,11 @@ import chilife as xl
 import numpy as np
 import MDAnalysis as mda
 from MDAnalysis.analysis.distances import dist
+import matplotlib.pyplot as plt
 import os
 from natsort import os_sorted
 import glob
 import pickle
-
-def gro2pdb(structure):
-    '''
-    This function creates a pdb from a gro file
-
-    This may not be needed at all
-    '''
 
 def initialize_files(starting_model, label_pairs, ca_dist_filename='ca_dist_dict', ca_index_filename='ca_index_dict'):
     '''
@@ -47,12 +41,13 @@ def make_pair_data_file(ca_dictionary, ca_indices, json_file_name='pair_data.jso
     Given a C-alpha dictionary and indices from the starting structure, this utility will create the appropriately
     formatted pair_data.json file for input to BRER. 
     '''
-    with open(f'{ca_dictionary}', 'rb') as file:    #unpickling C-alpha distance dictionary
+    with open(f'{ca_dictionary}.pickle', 'rb') as file:    #unpickling C-alpha distance dictionary
         ca_dictionary = pickle.load(file)
-    with open(f'{ca_indices}', 'rb') as file:       #unpickling C-alpha index dictionary
+    with open(f'{ca_indices}.pickle', 'rb') as file:       #unpickling C-alpha index dictionary
         ca_indices = pickle.load(file)
     
     keys = list(ca_dictionary.keys())
+    print(keys)
 
     json_template = ['{\n']
     json_file = open("{}".format(json_file_name), "w")
@@ -61,15 +56,16 @@ def make_pair_data_file(ca_dictionary, ca_indices, json_file_name='pair_data.jso
     count = 0
 
     for key in keys:
-        ca1_index, ca2_index = ca_indices[key]
+        ca1_index, ca2_index = ca_indices[key][0]
+        print(ca1_index, ca2_index)
         ca_dist = ca_dictionary[key][-1] #pulls the latest CA distance update
+        count+=1
         if count < len(keys):
             name = f'{key}'
             sites = f'{ca1_index}, {ca2_index}'
             dist = ca_dist/10 #this needs to be in nm for BRER/Gromacs
             dist = dist.tolist()
-            prob = 1            # 100% probability to pick this point (it's the only point lol)
-            prob=prob.tolist()
+            prob = [1]            # 100% probability to pick this point (it's the only point lol)
             
             json_template = [
             '   "{}":'.format(name),' {\n',
@@ -88,8 +84,7 @@ def make_pair_data_file(ca_dictionary, ca_indices, json_file_name='pair_data.jso
             sites = f'{ca1_index}, {ca2_index}'
             dist = ca_dist/10 #this needs to be in nm for BRER/Gromacs
             dist = dist.tolist()
-            prob = 1            # 100% probability to pick this point (it's the only point lol)
-            prob=prob.tolist()
+            prob = [1]            # 100% probability to pick this point (it's the only point lol)
             
             json_template = [
             '   "{}":'.format(name),' {\n',
@@ -135,10 +130,11 @@ def model_ntx_update_ca(structure, label, label_pair, exp_data, distr_bin, ca_bi
     r = array, specifies x-axis of label
     '''
     u=mda.Universe(structure)
-    exp_data = np.loadtxt(exp_data) #data needs to be loaded as array with first vector as r values
+    exp_data = np.loadtxt(exp_data).T #data needs to be loaded as array with first vector as r values
     r = exp_data[0] #r values need to be identical between experiment and modelled nitroxide for this to be accurate
+    P_exp = exp_data[1] # probabilities of exp distances
     distr_bin = distr_bin+'_'+label_pair+'_'+label+'.txt'   #name for distribution bin of a given label pair
-    with open(f'{ca_bin}', 'rb') as file:    #unpickling C-alpha distance dictionary
+    with open(f'{ca_bin}.pickle', 'rb') as file:    #unpickling C-alpha distance dictionary
         ca_dictionary = pickle.load(file) #load the ca distance dictionary
 
     site1, site2 = label_pair.split('_')
@@ -163,12 +159,12 @@ def model_ntx_update_ca(structure, label, label_pair, exp_data, distr_bin, ca_bi
          updated = P
     else:
          d = np.loadtxt(distr_bin)
-         updated = np.vstack(d, P)
+         updated = np.vstack([d, P])
          np.savetxt(distr_bin, updated)
 
     #Update C-alpha distance 
     if len(updated.shape) == 1:
-        residual = exp_data-updated
+        residual = P_exp-updated
         residual[residual<0]=0  #select for positive residuals
 
         #if updated is only one vector long, then the initial CA distance has not been measured yet
@@ -178,8 +174,15 @@ def model_ntx_update_ca(structure, label, label_pair, exp_data, distr_bin, ca_bi
 
     else:
         updated = updated.sum(axis=0)
-        residual = exp_data-updated
+        residual = P_exp-updated
         residual[residual<0]=0  #select for positive residuals
+    
+    plt.plot(r, updated/sum(updated), label=f'Modelled {label_pair}, {label}')
+    plt.plot(r, P_exp/sum(P_exp), label=f'Experimental {label_pair}, {label}')
+    plt.xlabel(r'Distance ($\AA$)')
+    plt.ylabel('Probability')
+    plt.title(f'{label_pair}, {label}')
+    plt.savefig(f'exp_vs_modelled_{label_pair}_{label}.png', bbox_inches='tight')
 
     res_w_avg = np.average(r, weights=residual/sum(residual))
     mod_w_avg = np.average(r, weights=updated/sum(updated))
@@ -189,6 +192,6 @@ def model_ntx_update_ca(structure, label, label_pair, exp_data, distr_bin, ca_bi
 
     #append new ca distance into CA dictionary
     ca_dictionary[label_pair].append(new_ca)
-    with open(f'{ca_bin}', 'wb') as file:
+    with open(f'{ca_bin}.pickle', 'wb') as file:
         pickle.dump(ca_dictionary, file)
         file.close()
