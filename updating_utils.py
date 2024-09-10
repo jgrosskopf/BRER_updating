@@ -110,6 +110,7 @@ def get_last_model(directory):
     '''
     _dir = os_sorted(glob.glob(directory+'/[!state.json]*')) #element the json file from the search
     _dir = os.path.join(_dir[-1], 'production/*.gro')         #take last file in dir and join with string to get last model
+    _dir = glob.glob(_dir)
     return _dir 
 
 def model_ntx_update_ca(structure, label, label_pair, exp_data, distr_bin, ca_bin='ca_bin', learn_rate=0.1, **kwargs):
@@ -182,7 +183,9 @@ def model_ntx_update_ca(structure, label, label_pair, exp_data, distr_bin, ca_bi
     plt.xlabel(r'Distance ($\AA$)')
     plt.ylabel('Probability')
     plt.title(f'{label_pair}, {label}')
+    plt.legend(handletextpad=0, handlelength=0, labelcolor='linecolor')
     plt.savefig(f'exp_vs_modelled_{label_pair}_{label}.png', bbox_inches='tight')
+    plt.clf()
 
     res_w_avg = np.average(r, weights=residual/sum(residual))
     mod_w_avg = np.average(r, weights=updated/sum(updated))

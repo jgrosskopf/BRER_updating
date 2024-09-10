@@ -1,6 +1,5 @@
 # This script will run the CA updating procedure after each BRER model is created
 from updating_utils import *
-import glob
 import argparse
 
 parser = argparse.ArgumentParser()
@@ -23,7 +22,8 @@ for exp in exp_data:
     for label_pair in label_pairs:
         if label_pair in exp:
             new_ca = model_ntx_update_ca(latest_structure, label='I1M', label_pair=label_pair, 
-                                         exp_data=exp, ca_bin=ca_dist_filename, learn_rate=learn_rate)
+                                         exp_data=exp, ca_bin=ca_dist_filename, distr_bin=distr_bin,
+                                         learn_rate=learn_rate)
             
 # create and update the pair_dist.json file
 make_pair_data_file(ca_dist_filename, ca_index_filename, json_filename)

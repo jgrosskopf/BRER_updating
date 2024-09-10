@@ -1,16 +1,21 @@
 # This is the script that will be called before BRER runs to initialize all files
 from updating_utils import *
-import glob
+import argparse
+
+parser = argparse.ArgumentParser()
+parser.add_argument('-s', '--starting-structure', type=str,
+                    help='Starting BRER structure')
+args = parser.parse_args()
 
 #enter in the relevant data here
-starting_structure = 'start_model.gro'  #starting structure into BRER
-label_pairs = ['148_266', '148_228']    #label pairs in DEER experiments. May need to be int in functions
+starting_structure = args.starting_structure  #starting structure into BRER
+label_pairs = ['148_266', '66_148']
 ca_dist_filename = 'ca_dist_dictionary'
 ca_index_filename = 'ca_index_dictionary'
 json_filename = 'pair_data.json'
-exp_data = glob.glob('expdata*.txt')    #get array of experimental data traces
+exp_data = glob.glob('b2*test.txt')    #get array of experimental data traces
 distr_bin = 'modelled_ntx_bin' # prefix name of file in which to hold modelled distributions
-learn_rate = 0.1
+learn_rate = 0.2
 
 #initializing dictionaries
 initialize_files(starting_structure, label_pairs, ca_dist_filename, ca_index_filename)
