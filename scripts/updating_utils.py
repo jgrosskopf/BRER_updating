@@ -1,3 +1,9 @@
+'''
+This script contains funcitons used in the iterative updating protocol including initializing files, creating the pair data file
+used to inform BRER of the target distance, extracting the last model from each iteration for input to the next iteration, and 
+calculating the update to the target distance. 
+'''
+
 import chilife as xl
 import numpy as np
 import MDAnalysis as mda
@@ -10,8 +16,15 @@ import pickle
 
 def initialize_files(starting_model, label_pairs, ca_dist_filename='ca_dist_dict', ca_index_filename='ca_index_dict'):
     '''
+    starting_model: .GRO file, dtype=str
+    label_pairs: list of strings of residue spin pairs, example = ['148_266', '66_228']
+    ca_dist_filename: name of file that holds history of distances between CA pairs, not including file extension, dtype=str
+    ca_index_filename: name of file that holds indices of CA atoms, not including file extension, dtype=str
+
     Initialize the files that will hold the C-alphas distances and indices. The keys for these two dictionaries should
     be identical for use later on.
+
+    Starting model is specified from the get_last_model function, but can be specified manually.
     '''
     ca_dist_dict = {}
     ca_index_dict = {}
@@ -106,34 +119,49 @@ def get_last_model(directory):
     folder will be loaded and the members of that folder will then be searched, gathered, and ordered with natsort.
     Then, the last file in the string will be chosen, which is the last model created, and labeled.
 
-    dir: string, directory to search
+    directory: directory to search, dtype=str
     '''
     _dir = os_sorted(glob.glob(directory+'/[!state.json]*')) #element the json file from the search
     _dir = os.path.join(_dir[-1], 'production/*.gro')         #take last file in dir and join with string to get last model
     _dir = glob.glob(_dir)
     return _dir 
 
-def model_ntx_update_ca(structure, label, label_pair, exp_data, distr_bin, ens_num, ca_bin='ca_bin', learn_rate=0.1, **kwargs):
+def model_ntx_update_ca(structure, label, label_pair, exp_data, distr_bin, ens_num, ca_bin='ca_bin', learn_rate=0.2, momentum=1, **kwargs):
     '''
     This function creates a modelled nitroxide distribution from and input structure,
     specifically from BRER. It then Updates the pair_data file with new C-alpha distances in which to bias the protein. 
     This is based on the positive residuals from exp - ntxd_model_data. The weighted average distance of the poistive 
     residuals is computed, as well as the weighted average of the cumulative model_data. The difference of these two values
-    are multipled by a learning rate and posed as the next bias distance.
+    are multipled by a learning rate and posed as the next bias distance. 
+
+    This function also creates a graphical image of the cumulative distirbution of all models for each spin pair overlayed
+    with the experimental distribution to help track the progress of the modeling.
     
     structure: string, path to structure/model in PDB/GRO format
     
     label: string, i.e. 'I1M' or 'R1M'
-    site1/2 = int, residue to label
+    label_pair = int, residue to label example: '148_266'
+
+    exp_data = experimental data/distiance distribution to be used, must have distance values in one column and probabilities
+    in another column.
 
     distr_bin = str, file name in which the modelled nitroxide distributions are held
+
+    ens_num = number of ensemble/independent run being generated, dtype=int
+
+    ca_bin: name of file with CA distances, dtype=str
+
+    learn_rate: default=0.2; fraction to adjust the CA distance by based on the difference between current and previous
+    simulated spinlabel distributions of the same site. This parameter essentially determines the 'jump' size. dtype=float
+
+    momentum: default=1; the number of previous models to incorporate into the CA distance update. This parameter helps to fill
+    out broader distributions by using greater momentum/previous structures. dtype=float
     
-    r = array, specifies x-axis of label
     '''
     u=mda.Universe(structure)
     exp_data = np.loadtxt(exp_data).T #data needs to be loaded as array with first vector as r values
     r = exp_data[0] #r values need to be identical between experiment and modelled nitroxide for this to be accurate
-    P_exp = exp_data[1]/sum(exp_data[1]) # probabilities of exp distances
+    P_exp = exp_data[1]/sum(exp_data[1]) # probabilities of exp distances, area normalized
     distr_bin = distr_bin+'_'+label_pair+'_'+label+'.txt'   #name for distribution bin of a given label pair
     with open(f'{ca_bin}.pickle', 'rb') as file:    #unpickling C-alpha distance dictionary
         ca_dictionary = pickle.load(file) #load the ca distance dictionary
@@ -143,8 +171,7 @@ def model_ntx_update_ca(structure, label, label_pair, exp_data, distr_bin, ens_n
     SL1 = xl.SpinLabel(protein=u, label=label, site=site1)
     SL2 = xl.SpinLabel(protein=u, label=label, site=site2)
 
-    #need to add in error handling for the spin label, especially V1X
-    #also need to create a function to do this for each label pair. Might not have to be part of utils
+    #this is where to update any labeling parameters, i.e. repititions, burn-in, off_rotamer, etc.
     traj, de = xl.repack(u, SL1, SL2,
                             repetitions=2500,
                             temp=295,
@@ -159,25 +186,13 @@ def model_ntx_update_ca(structure, label, label_pair, exp_data, distr_bin, ens_n
     if os.path.exists(distr_bin) == False:
          np.savetxt(distr_bin, P)
          updated = P
+         updated_copy = P
     else:
-         d = np.loadtxt(distr_bin)
-         updated = np.vstack([d, P])
-         np.savetxt(distr_bin, updated)
-
-    #Update C-alpha distance 
-    if len(updated.shape) == 1:
-        residual = P_exp-updated
-        residual[residual<0]=0  #select for positive residuals
-
-        #if updated is only one vector long, then the initial CA distance has not been measured yet
-        ca_1 = u.select_atoms(f'resid {site1} and name CA')
-        ca_2 = u.select_atoms(f'resid {site2} and name CA')
-        res1, res2, ca = dist(ca_1, ca_2)
-
-    else:
+        d = np.loadtxt(distr_bin)
+        updated = np.vstack([d, P])
+        updated_copy = np.vstack([d, P])
+        np.savetxt(distr_bin, updated)
         updated = updated.sum(axis=0)
-        residual = P_exp-updated
-        residual[residual<0]=0  #select for positive residuals
     
     plt.plot(r, updated/sum(updated), label=f'Modelled {label_pair}, {label}')
     plt.plot(r, P_exp/sum(P_exp), label=f'Experimental {label_pair}, {label}')
@@ -187,9 +202,37 @@ def model_ntx_update_ca(structure, label, label_pair, exp_data, distr_bin, ens_n
     plt.legend(handletextpad=0, handlelength=0, labelcolor='linecolor')
     plt.savefig(f'exp_vs_modelled_{label_pair}_{label}_{ens_num}.png', bbox_inches='tight')
     plt.clf()
+    
+    #Update C-alpha distance 
+    if len(updated_copy.shape) == 1:
+        residual = P_exp-P
+        residual[residual<0]=0  #select for positive residuals
 
-    res_w_avg = np.average(r, weights=residual/sum(residual))
-    mod_w_avg = np.average(r, weights=updated/sum(updated))
+        #if updated is only one vector long, then the initial CA distance has not been measured yet
+        ca_1 = u.select_atoms(f'resid {site1} and name CA')
+        ca_2 = u.select_atoms(f'resid {site2} and name CA')
+        res1, res2, ca = dist(ca_1, ca_2) # I don't think I need this, but I don't want to break something
+        
+        res_w_avg = np.average(r, weights=residual/sum(residual))
+        mod_w_avg = np.average(r, weights=P)
+
+    elif len(updated_copy.shape) < momentum:
+        #this will only use the last model distribution until the amount of model dists is greater than the momentum number
+        #this avaoids issues when wanting to use the last (example) 3 model distributions when we only generated 2 models so far
+        residual = P_exp-P
+        residual[residual<0]=0  #select for positive residuals
+        
+        res_w_avg = np.average(r, weights=residual/sum(residual))
+        mod_w_avg = np.average(r, weights=P)
+        
+    else:
+        P = updated_copy[-momentum:].sum(axis=0)
+        P = P/sum(P)
+        residual = P_exp-P
+        residual[residual<0]=0  #select for positive residuals
+        
+        res_w_avg = np.average(r, weights=residual/sum(residual))
+        mod_w_avg = np.average(r, weights=P)
 
     prev_ca = ca_dictionary[label_pair][-1]
     new_ca = prev_ca + (learn_rate*(res_w_avg-mod_w_avg)) 
