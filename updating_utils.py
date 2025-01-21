@@ -113,7 +113,7 @@ def get_last_model(directory):
     _dir = glob.glob(_dir)
     return _dir 
 
-def model_ntx_update_ca(structure, label, label_pair, exp_data, distr_bin, ca_bin='ca_bin', learn_rate=0.1, **kwargs):
+def model_ntx_update_ca(structure, label, label_pair, exp_data, distr_bin, ens_num, ca_bin='ca_bin', learn_rate=0.1, **kwargs):
     '''
     This function creates a modelled nitroxide distribution from and input structure,
     specifically from BRER. It then Updates the pair_data file with new C-alpha distances in which to bias the protein. 
@@ -133,7 +133,7 @@ def model_ntx_update_ca(structure, label, label_pair, exp_data, distr_bin, ca_bi
     u=mda.Universe(structure)
     exp_data = np.loadtxt(exp_data).T #data needs to be loaded as array with first vector as r values
     r = exp_data[0] #r values need to be identical between experiment and modelled nitroxide for this to be accurate
-    P_exp = exp_data[1] # probabilities of exp distances
+    P_exp = exp_data[1]/sum(exp_data[1]) # probabilities of exp distances
     distr_bin = distr_bin+'_'+label_pair+'_'+label+'.txt'   #name for distribution bin of a given label pair
     with open(f'{ca_bin}.pickle', 'rb') as file:    #unpickling C-alpha distance dictionary
         ca_dictionary = pickle.load(file) #load the ca distance dictionary
@@ -154,6 +154,7 @@ def model_ntx_update_ca(structure, label, label_pair, exp_data, distr_bin, ca_bi
     SL2r = xl.SpinLabel.from_trajectory(traj, site=int(site2), burn_in=1000, spin_atoms=SL2.spin_atoms)
 
     P = np.array(xl.distance_distribution(SL1r, SL2r, r))
+    P = P/sum(P)
     
     if os.path.exists(distr_bin) == False:
          np.savetxt(distr_bin, P)
@@ -184,7 +185,7 @@ def model_ntx_update_ca(structure, label, label_pair, exp_data, distr_bin, ca_bi
     plt.ylabel('Probability')
     plt.title(f'{label_pair}, {label}')
     plt.legend(handletextpad=0, handlelength=0, labelcolor='linecolor')
-    plt.savefig(f'exp_vs_modelled_{label_pair}_{label}.png', bbox_inches='tight')
+    plt.savefig(f'exp_vs_modelled_{label_pair}_{label}_{ens_num}.png', bbox_inches='tight')
     plt.clf()
 
     res_w_avg = np.average(r, weights=residual/sum(residual))
