@@ -1,4 +1,4 @@
-# BRER-chiLife module for modeling proteins from DEER distance distributions
+# ProGuide module for modeling proteins from DEER distance distributions
 
 ## Description
 This is open-source code for modeling/refining protein conformations from distance distributions. The examples shown here specifically use distance distributions derived from double electron-electron resonance (DEER) spectroscopy.
